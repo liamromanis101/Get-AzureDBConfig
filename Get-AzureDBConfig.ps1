@@ -49,18 +49,15 @@ foreach ($sub in $subscriptions) {
 
             # Get TDE status
             try {
-                Write-Verbose "Getting TDE status for database '$dbName'..."
                 $tde = Get-AzSqlDatabaseTransparentDataEncryption -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
                 $TDE_Enabled = if ($tde.Status -eq 'Enabled') { $true } else { $false }
             } catch {
-                Write-Warning "Could not retrieve TDE status for database '$dbName' on server '$serverName'. Check permissions and module versions."
+                Write-Warning "Could not retrieve TDE status for '$dbName'."
             }
 
-            # Get Auditing via Diagnostic Settings
+            # Get auditing settings (diagnostic settings)
             try {
-                Write-Verbose "Getting Diagnostic Settings for database '$dbName'..."
-                $dbResourceId = $db.Id
-                $diagSettings = Get-AzDiagnosticSetting -ResourceId $dbResourceId -ErrorAction Stop
+                $diagSettings = Get-AzDiagnosticSetting -ResourceId $db.Id -ErrorAction Stop
                 if ($diagSettings) {
                     $AuditingEnabled = $true
                     if ($diagSettings.RetentionPolicy) {
@@ -68,61 +65,62 @@ foreach ($sub in $subscriptions) {
                     }
                 }
             } catch {
-                Write-Warning "Could not retrieve auditing (diagnostic settings) for database '$dbName'."
+                Write-Warning "Could not retrieve diagnostic settings for '$dbName'."
             }
 
-            # Get Advanced Threat Protection (ATP) status
+            # Get advanced threat protection
             try {
-                Write-Verbose "Getting Advanced Threat Protection status for database '$dbName'..."
                 $threatDetection = Get-AzSqlDatabaseAdvancedThreatProtectionSetting -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
-                $Threat_Detection_Enabled = if ($threatDetection.State -eq 'Enabled') { $true } else { $false }
+                $Threat_Detection_Enabled = ($threatDetection.State -eq 'Enabled')
                 if ($Threat_Detection_Enabled) {
                     $SendThreatDetectionAlerts = $threatDetection.EmailAdmins
                     $Threat_DetectionRetentionDays = $threatDetection.RetentionDays
                 }
             } catch {
-                Write-Warning "Could not retrieve Threat Detection status for database '$dbName'. Verify Az.Sql module version and permissions."
+                Write-Warning "Could not retrieve threat detection settings for '$dbName'."
             }
 
-            # Get Geo-Replication info by enumerating replication links WITHOUT PartnerResourceGroupName
+            # Geo-replication check: must discover partner group
             try {
-                Write-Verbose "Checking geo-replication for database '$dbName'..."
-                # This gets replication links without requiring PartnerResourceGroupName
-                $replications = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
+                $allLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -PartnerServerName '*' -PartnerResourceGroupName '*' -ErrorAction SilentlyContinue
 
-                if ($replications -and $replications.Count -gt 0) {
-                    # There are geo-replication links configured
-                    $GeoReplicationConfigured = $true
-                    # Optionally, you could collect info about partner servers here if desired
-                } else {
-                    $GeoReplicationConfigured = $false
+                if (-not $allLinks -or $allLinks.Count -eq 0) {
+                    # Try fallback by fetching all server-level links
+                    $allLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -ErrorAction SilentlyContinue
+                }
+
+                foreach ($link in $allLinks) {
+                    if ($link.DatabaseName -eq $dbName) {
+                        $GeoReplicationConfigured = $true
+                        break
+                    }
                 }
             } catch {
-                Write-Warning "Could not retrieve geo-replication info for database '$dbName'."
+                Write-Warning "Could not retrieve replication info for '$dbName'."
             }
 
-            # Add to results
+            # Append result
             $results += [PSCustomObject]@{
                 SubscriptionName              = $sub.Name
                 SubscriptionId                = $sub.Id
                 ResourceGroupName             = $rgName
-                ServerName                   = $serverName
-                DatabaseName                 = $dbName
-                TDE_Enabled                  = $TDE_Enabled
-                AuditingEnabled              = $AuditingEnabled
-                AuditingRetentionDays        = $AuditingRetentionDays
-                Threat_Detection_Enabled     = $Threat_Detection_Enabled
-                SendThreatDetectionAlerts    = $SendThreatDetectionAlerts
+                ServerName                    = $serverName
+                DatabaseName                  = $dbName
+                TDE_Enabled                   = $TDE_Enabled
+                AuditingEnabled               = $AuditingEnabled
+                AuditingRetentionDays         = $AuditingRetentionDays
+                Threat_Detection_Enabled      = $Threat_Detection_Enabled
+                SendThreatDetectionAlerts     = $SendThreatDetectionAlerts
                 Threat_DetectionRetentionDays = $Threat_DetectionRetentionDays
-                GeoReplicationConfigured     = $GeoReplicationConfigured
+                GeoReplicationConfigured      = $GeoReplicationConfigured
             }
         }
     }
 }
 
-# Export results to CSV
+# Export results
 $outputFile = "AzureSqlSecurityReport.csv"
 Write-Host "Exporting results to $outputFile"
 $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
 
-Write-Host "Audit completed."
+Write-Host "Security audit completed."
