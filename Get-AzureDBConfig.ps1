@@ -1,116 +1,113 @@
-# Ensure Az modules are installed and imported
-$modules = @("Az.Accounts", "Az.Resources", "Az.Sql", "Az.Monitor")
-foreach ($mod in $modules) {
-    if (-not (Get-Module -ListAvailable -Name $mod)) {
-        Write-Host "Module $mod not found. Installing..."
-        Install-Module -Name $mod -Scope CurrentUser -Force
-    }
-    Import-Module $mod -ErrorAction Stop
+# Ensure Az module is installed and imported
+if (-not (Get-Module -ListAvailable -Name Az)) {
+    Install-Module -Name Az -Scope CurrentUser -Force
+}
+Import-Module Az
+
+# Connect to Azure if not already connected
+if (-not (Get-AzContext)) {
+    Connect-AzAccount
 }
 
-# Login to Azure
-Write-Host "Logging into Azure..."
-Connect-AzAccount -ErrorAction Stop
-
-# Optional: Set Verbose preference
-$VerbosePreference = "Continue"
-
-# Prepare output array
+# Initialize results
 $results = @()
 
 # Get all subscriptions
 $subscriptions = Get-AzSubscription
 
 foreach ($sub in $subscriptions) {
-    Write-Host "Processing subscription: $($sub.Name) ($($sub.Id))"
-    Set-AzContext -Subscription $sub.Id -ErrorAction Stop
+    Set-AzContext -SubscriptionId $sub.Id
 
-    # Get SQL Servers in subscription
+    # Get all SQL servers in subscription
     $servers = Get-AzSqlServer
+
     foreach ($server in $servers) {
         $serverName = $server.ServerName
         $rgName = $server.ResourceGroupName
-        Write-Verbose "Processing SQL Server: $serverName in resource group $rgName"
 
-        # Get SQL Databases on server
-        $databases = Get-AzSqlDatabase -ResourceGroupName $rgName -ServerName $serverName
+        # Get all SQL databases on the server
+        $databases = Get-AzSqlDatabase -ResourceGroupName $rgName -ServerName $serverName | Where-Object { $_.DatabaseName -ne "master" }
+
         foreach ($db in $databases) {
             $dbName = $db.DatabaseName
-            Write-Verbose "Processing database: $dbName"
 
-            # Initialize variables
+            # Initialize flags
             $TDE_Enabled = $null
-            $Threat_Detection_Enabled = $null
-            $AuditingEnabled = $false
+            $AuditingEnabled = $null
             $AuditingRetentionDays = $null
+            $Threat_Detection_Enabled = $null
+            $SendThreatDetectionAlerts = $null
             $Threat_DetectionRetentionDays = $null
-            $SendThreatDetectionAlerts = $false
             $GeoReplicationConfigured = $false
 
-            # Get TDE status
+            # Transparent Data Encryption
             try {
-                $tde = Get-AzSqlDatabaseTransparentDataEncryption -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
-                $TDE_Enabled = if ($tde.Status -eq 'Enabled') { $true } else { $false }
+                $tde = Get-AzSqlDatabaseTransparentDataEncryption -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName
+                $TDE_Enabled = $tde.Status -eq "Enabled"
             } catch {
-                Write-Warning "Could not retrieve TDE status for '$dbName'."
+                Write-Warning "TDE check failed for $dbName: $_"
             }
 
-            # Get auditing settings (diagnostic settings)
+            # Auditing
             try {
-                $diagSettings = Get-AzDiagnosticSetting -ResourceId $db.Id -ErrorAction Stop
-                if ($diagSettings) {
+                $auditing = Get-AzSqlDatabaseAudit -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName
+                if ($auditing.AuditState -eq "Enabled") {
                     $AuditingEnabled = $true
-                    if ($diagSettings.RetentionPolicy) {
-                        $AuditingRetentionDays = $diagSettings.RetentionPolicy.Days
-                    }
+                    $AuditingRetentionDays = $auditing.RetentionInDays
+                } else {
+                    $AuditingEnabled = $false
                 }
             } catch {
-                Write-Warning "Could not retrieve diagnostic settings for '$dbName'."
+                Write-Warning "Auditing check failed for $dbName: $_"
+                $AuditingEnabled = $false
             }
 
-            # Get advanced threat protection
+            # Threat Detection
             try {
-                $threatDetection = Get-AzSqlDatabaseAdvancedThreatProtectionSetting -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
-                $Threat_Detection_Enabled = ($threatDetection.State -eq 'Enabled')
-                if ($Threat_Detection_Enabled) {
-                    $SendThreatDetectionAlerts = $threatDetection.EmailAdmins
-                    $Threat_DetectionRetentionDays = $threatDetection.RetentionDays
+                $td = Get-AzSqlDatabaseAdvancedThreatProtectionSetting -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName
+                $Threat_Detection_Enabled = $td.State -eq "Enabled"
+            } catch {
+                Write-Warning "Threat detection check failed for $dbName: $_"
+                $Threat_Detection_Enabled = $false
+            }
+
+            # Diagnostic Settings (used to find alerts and retention)
+            try {
+                $resourceId = $db.Id
+                if (-not [string]::IsNullOrEmpty($resourceId)) {
+                    $diag = Get-AzDiagnosticSetting -ResourceId $resourceId
+                    $SendThreatDetectionAlerts = ($diag.Metrics.Count -gt 0 -or $diag.Logs.Count -gt 0)
+                } else {
+                    Write-Warning "ResourceId is null for $dbName"
+                    $SendThreatDetectionAlerts = $false
                 }
             } catch {
-                Write-Warning "Could not retrieve threat detection settings for '$dbName'."
+                Write-Warning "Diagnostic settings check failed for $dbName: $_"
+                $SendThreatDetectionAlerts = $false
             }
 
-            # Geo-replication detection
+            # Geo-replication
             try {
-                $GeoReplicationConfigured = $false
-
-                # Enumerate all replication links at the server level
-                $serverLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -ErrorAction Stop
-
-                # Try to find a link that matches the current database
-                $repLink = $serverLinks | Where-Object { $_.DatabaseName -eq $dbName }
+                $replicationLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -ErrorAction Stop
+                $repLink = $replicationLinks | Where-Object { $_.DatabaseName -eq $dbName }
 
                 if ($repLink) {
-                    $GeoReplicationConfigured = $true
+                    $replicationDetail = Get-AzSqlDatabaseReplicationLink `
+                        -ResourceGroupName $rgName `
+                        -ServerName $serverName `
+                        -DatabaseName $dbName `
+                        -PartnerResourceGroupName $repLink.PartnerResourceGroupName `
+                        -PartnerServerName $repLink.PartnerServerName `
+                        -ErrorAction Stop
 
-                    # Optional: Confirm replication by calling again with required parameters
-                    try {
-                        $linkDetails = Get-AzSqlDatabaseReplicationLink `
-                            -ResourceGroupName $rgName `
-                            -ServerName $serverName `
-                            -DatabaseName $dbName `
-                            -PartnerResourceGroupName $repLink.PartnerResourceGroupName `
-                            -PartnerServerName $repLink.PartnerServerName `
-                            -ErrorAction Stop
-                    } catch {
-                        Write-Warning "Replication link exists for '$dbName', but could not retrieve full details."
+                    if ($replicationDetail) {
+                        $GeoReplicationConfigured = $true
                     }
-                 }
-             } catch {
-                 Write-Warning "Could not enumerate replication links for server '$serverName': $_"
-                 $GeoReplicationConfigured = $false
-             }
-
+                }
+            } catch {
+                Write-Warning "Geo-replication check failed for $dbName: $_"
+                $GeoReplicationConfigured = $false
+            }
 
             # Default unset/null values to 'false' or 'NotConfigured'
             if ($null -eq $TDE_Enabled) { $TDE_Enabled = $false }
@@ -119,8 +116,10 @@ foreach ($sub in $subscriptions) {
             if ($null -eq $SendThreatDetectionAlerts) { $SendThreatDetectionAlerts = $false }
             if ($null -eq $GeoReplicationConfigured) { $GeoReplicationConfigured = $false }
 
+            if (-not $AuditingRetentionDays) { $AuditingRetentionDays = "NotConfigured" }
+            if (-not $Threat_DetectionRetentionDays) { $Threat_DetectionRetentionDays = "NotConfigured" }
 
-            # Append result
+            # Collect results
             $results += [PSCustomObject]@{
                 SubscriptionName              = $sub.Name
                 SubscriptionId                = $sub.Id
@@ -140,8 +139,5 @@ foreach ($sub in $subscriptions) {
 }
 
 # Export results
-$outputFile = "AzureSqlSecurityReport.csv"
-Write-Host "Exporting results to $outputFile"
-$results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
-
-Write-Host "Security audit completed."
+$results | Export-Csv -Path "./SqlDatabaseSecurityReport.csv" -NoTypeInformation
+Write-Host "✅ Report written to SqlDatabaseSecurityReport.csv"
