@@ -76,7 +76,7 @@ for sub in subscription_client.subscriptions.list():
 
                 # Threat detection (database-level)
                 try:
-                    db_alert_policy = sql_client.database_security_alert_policies.get(resource_group, server.name, db.name)
+                    db_alert_policy = sql_client.database_security_alert_policies.get(resource_group, server.name, db.name, "Default")
                     if db_alert_policy.state != "Enabled":
                         print(f"      ❌ Threat detection is disabled at DB level!")
                     else:
