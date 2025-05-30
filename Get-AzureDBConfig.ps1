@@ -99,6 +99,14 @@ foreach ($sub in $subscriptions) {
                 Write-Warning "Could not retrieve replication info for '$dbName'."
             }
 
+            # Default unset/null values to 'false' or 'NotConfigured'
+            if ($null -eq $TDE_Enabled) { $TDE_Enabled = $false }
+            if ($null -eq $AuditingEnabled) { $AuditingEnabled = $false }
+            if ($null -eq $Threat_Detection_Enabled) { $Threat_Detection_Enabled = $false }
+            if ($null -eq $SendThreatDetectionAlerts) { $SendThreatDetectionAlerts = $false }
+            if ($null -eq $GeoReplicationConfigured) { $GeoReplicationConfigured = $false }
+
+
             # Append result
             $results += [PSCustomObject]@{
                 SubscriptionName              = $sub.Name
