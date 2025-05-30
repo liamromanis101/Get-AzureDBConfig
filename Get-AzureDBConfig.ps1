@@ -15,7 +15,6 @@ Ensure-AzModule -ModuleName "Az.Accounts"
 Ensure-AzModule -ModuleName "Az.Resources"
 Ensure-AzModule -ModuleName "Az.Sql"
 Ensure-AzModule -ModuleName "Az.Monitor"
-Ensure-AzModule -ModuleName "Az.Security"
 
 # Log in to Azure
 Connect-AzAccount
@@ -60,15 +59,30 @@ foreach ($sub in $subscriptions) {
                 $isGeoReplicated = "Unknown"
             }
 
-            # Diagnostic Settings (Auditing via Azure Monitor)
-            $diagSettings = Get-AzDiagnosticSetting -ResourceId $db.Id
-            $auditSetting = $diagSettings | Where-Object {
-                $_.Enabled -eq $true -and $_.Logs.Category -contains "SQLSecurityAuditEvents"
+            # Build the resource ID for diagnostic settings
+            $resourceId = "/subscriptions/$($sub.Id)/resourceGroups/$($server.ResourceGroupName)/providers/Microsoft.Sql/servers/$($server.ServerName)/databases/$($db.DatabaseName)"
+
+            # Diagnostic Settings (Auditing)
+            try {
+                $diagSettings = Get-AzDiagnosticSetting -ResourceId $resourceId
+                $auditSetting = $diagSettings | Where-Object {
+                    $_.Enabled -eq $true -and $_.Logs.Category -contains "SQLSecurityAuditEvents"
+                }
+            } catch {
+                Write-Warning "    Could not retrieve diagnostic settings for $($db.DatabaseName): $($_.Exception.Message)"
+                $auditSetting = $null
             }
 
-            # Defender for SQL (Threat Detection)
-            $td = Get-AzSecurityAlertPolicy -ResourceGroupName $server.ResourceGroupName `
-                -ServerName $server.ServerName -DatabaseName $db.DatabaseName
+            # Advanced Threat Protection
+            try {
+                $td = Get-AzSqlDatabaseAdvancedThreatProtectionSetting `
+                    -ResourceGroupName $server.ResourceGroupName `
+                    -ServerName $server.ServerName `
+                    -DatabaseName $db.DatabaseName
+            } catch {
+                Write-Warning "    Could not retrieve ATP settings for $($db.DatabaseName): $($_.Exception.Message)"
+                $td = $null
+            }
 
             # Compose result
             $results += [PSCustomObject]@{
@@ -78,10 +92,8 @@ foreach ($sub in $subscriptions) {
                 DatabaseName                     = $db.DatabaseName
                 TDE_Enabled                      = $tde.Status
                 Auditing_Enabled                 = if ($auditSetting) { "Enabled" } else { "Disabled" }
-                Auditing_Retention_Days          = $auditSetting.RetentionPolicy.Days
-                Threat_Detection_Enabled         = $td.State
-                Threat_Detection_Emails          = ($td.EmailAddresses -join ", ")
-                Threat_Detection_Retention_Days  = $td.RetentionDays
+                Auditing_Retention_Days          = if ($auditSetting) { $auditSetting.RetentionPolicy.Days } else { "N/A" }
+                Threat_Detection_Enabled         = if ($td) { $td.State } else { "Unknown" }
                 GeoReplication_Configured        = $isGeoReplicated
             }
         }
