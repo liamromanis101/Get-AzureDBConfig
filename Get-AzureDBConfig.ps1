@@ -1,8 +1,6 @@
-# Function to ensure required Az modules are installed
+# Ensure required modules are installed
 function Ensure-AzModule {
-    param (
-        [string]$ModuleName
-    )
+    param ([string]$ModuleName)
     $installed = Get-InstalledModule -Name $ModuleName -ErrorAction SilentlyContinue
     if (-not $installed) {
         Write-Host "Installing module $ModuleName..." -ForegroundColor Yellow
@@ -12,15 +10,17 @@ function Ensure-AzModule {
     }
 }
 
-# Ensure required modules
+# Ensure modules are present
 Ensure-AzModule -ModuleName "Az.Accounts"
 Ensure-AzModule -ModuleName "Az.Resources"
 Ensure-AzModule -ModuleName "Az.Sql"
+Ensure-AzModule -ModuleName "Az.Monitor"
+Ensure-AzModule -ModuleName "Az.Security"
 
-# Connect to Azure
+# Log in to Azure
 Connect-AzAccount
 
-# Initialize results array
+# Prepare results array
 $results = @()
 $subscriptions = Get-AzSubscription
 
@@ -34,35 +34,36 @@ foreach ($sub in $subscriptions) {
 
         foreach ($db in $databases) {
             if ($db.DatabaseName -eq "master") { continue }
-
             Write-Host "  Checking Database: $($db.DatabaseName)" -ForegroundColor Yellow
 
             # Transparent Data Encryption
             $tde = Get-AzSqlDatabaseTransparentDataEncryption -ResourceGroupName $server.ResourceGroupName `
                 -ServerName $server.ServerName -DatabaseName $db.DatabaseName
 
-            # Auditing
-            $audit = Get-AzSqlDatabaseAuditing -ResourceGroupName $server.ResourceGroupName `
-                -ServerName $server.ServerName -DatabaseName $db.DatabaseName
-
-            # Threat Detection / Advanced Data Security
-            $td = Get-AzSqlDatabaseThreatDetectionPolicy -ResourceGroupName $server.ResourceGroupName `
-                -ServerName $server.ServerName -DatabaseName $db.DatabaseName
-
-            # Geo-replication check
+            # Geo-replication
             $replicationLinks = Get-AzSqlDatabaseReplicationLink -ServerName $server.ServerName `
                 -DatabaseName $db.DatabaseName -ResourceGroupName $server.ResourceGroupName
             $isGeoReplicated = if ($replicationLinks) { $true } else { $false }
 
-            # Build the result object
+            # Diagnostic Settings (Auditing via Azure Monitor)
+            $diagSettings = Get-AzDiagnosticSetting -ResourceId $db.Id
+            $auditSetting = $diagSettings | Where-Object {
+                $_.Enabled -eq $true -and $_.Logs.Category -contains "SQLSecurityAuditEvents"
+            }
+
+            # Defender for SQL (Threat Detection)
+            $td = Get-AzSecurityAlertPolicy -ResourceGroupName $server.ResourceGroupName `
+                -ServerName $server.ServerName -DatabaseName $db.DatabaseName
+
+            # Compose result
             $results += [PSCustomObject]@{
                 Subscription                     = $sub.Name
                 ResourceGroup                    = $server.ResourceGroupName
                 ServerName                       = $server.ServerName
                 DatabaseName                     = $db.DatabaseName
                 TDE_Enabled                      = $tde.Status
-                Auditing_Enabled                 = $audit.State
-                Auditing_Retention_Days          = $audit.RetentionInDays
+                Auditing_Enabled                 = if ($auditSetting) { "Enabled" } else { "Disabled" }
+                Auditing_Retention_Days          = $auditSetting.RetentionPolicy.Days
                 Threat_Detection_Enabled         = $td.State
                 Threat_Detection_Emails          = ($td.EmailAddresses -join ", ")
                 Threat_Detection_Retention_Days  = $td.RetentionDays
@@ -73,7 +74,7 @@ foreach ($sub in $subscriptions) {
 }
 
 # Export to CSV
-$csvPath = "AzureSqlSecurityDetails.csv"
+$csvPath = "AzureSqlSecurityReport.csv"
 $results | Export-Csv -Path $csvPath -NoTypeInformation
 
 Write-Host "`n✅ Security audit completed. Results saved to $csvPath" -ForegroundColor Green
