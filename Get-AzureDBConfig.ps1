@@ -41,9 +41,24 @@ foreach ($sub in $subscriptions) {
                 -ServerName $server.ServerName -DatabaseName $db.DatabaseName
 
             # Geo-replication
-            $replicationLinks = Get-AzSqlDatabaseReplicationLink -ServerName $server.ServerName `
-                -DatabaseName $db.DatabaseName -ResourceGroupName $server.ResourceGroupName
-            $isGeoReplicated = if ($replicationLinks) { $true } else { $false }
+            try {
+                $partnerRG = $db.ReplicationLinks | Select-Object -First 1 | ForEach-Object { $_.PartnerResourceGroupName }
+
+                if ($partnerRG) {
+                    $replicationLinks = Get-AzSqlDatabaseReplicationLink `
+                        -ResourceGroupName $server.ResourceGroupName `
+                        -ServerName $server.ServerName `
+                        -DatabaseName $db.DatabaseName `
+                        -PartnerResourceGroupName $partnerRG
+
+                    $isGeoReplicated = if ($replicationLinks) { $true } else { $false }
+                } else {
+                    $isGeoReplicated = $false
+                }
+            } catch {
+                Write-Warning "    Could not retrieve replication info for $($db.DatabaseName): $($_.Exception.Message)"
+                $isGeoReplicated = "Unknown"
+            }
 
             # Diagnostic Settings (Auditing via Azure Monitor)
             $diagSettings = Get-AzDiagnosticSetting -ResourceId $db.Id
