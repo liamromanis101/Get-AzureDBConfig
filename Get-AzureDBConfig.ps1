@@ -80,24 +80,37 @@ foreach ($sub in $subscriptions) {
                 Write-Warning "Could not retrieve threat detection settings for '$dbName'."
             }
 
-            # Geo-replication check: must discover partner group
+            # Geo-replication detection
             try {
-                $allLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -PartnerServerName '*' -PartnerResourceGroupName '*' -ErrorAction SilentlyContinue
+                $GeoReplicationConfigured = $false
 
-                if (-not $allLinks -or $allLinks.Count -eq 0) {
-                    # Try fallback by fetching all server-level links
-                    $allLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -ErrorAction SilentlyContinue
-                }
+                # Enumerate all replication links at the server level
+                $serverLinks = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -ErrorAction Stop
 
-                foreach ($link in $allLinks) {
-                    if ($link.DatabaseName -eq $dbName) {
-                        $GeoReplicationConfigured = $true
-                        break
+                # Try to find a link that matches the current database
+                $repLink = $serverLinks | Where-Object { $_.DatabaseName -eq $dbName }
+
+                if ($repLink) {
+                    $GeoReplicationConfigured = $true
+
+                    # Optional: Confirm replication by calling again with required parameters
+                    try {
+                        $linkDetails = Get-AzSqlDatabaseReplicationLink `
+                            -ResourceGroupName $rgName `
+                            -ServerName $serverName `
+                            -DatabaseName $dbName `
+                            -PartnerResourceGroupName $repLink.PartnerResourceGroupName `
+                            -PartnerServerName $repLink.PartnerServerName `
+                            -ErrorAction Stop
+                    } catch {
+                        Write-Warning "Replication link exists for '$dbName', but could not retrieve full details."
                     }
-                }
-            } catch {
-                Write-Warning "Could not retrieve replication info for '$dbName'."
-            }
+                 }
+             } catch {
+                 Write-Warning "Could not enumerate replication links for server '$serverName': $_"
+                 $GeoReplicationConfigured = $false
+             }
+
 
             # Default unset/null values to 'false' or 'NotConfigured'
             if ($null -eq $TDE_Enabled) { $TDE_Enabled = $false }
