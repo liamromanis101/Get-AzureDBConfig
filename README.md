@@ -33,13 +33,12 @@ This tool provides a snapshot of specific security configurations. It does not g
 ## Example Outout
 
 📦 Subscription: My Company Prod Subscription (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-  🖥️ SQL Server: my-sql-server-prod (uksouth, RG: prod-resources)
+🖥️ SQL Server: my-sql-server-prod (uksouth, RG: prod-resources)
     ⚠️ Insecure firewall rule: AllowAllIPs allows all IPs
     ❌ Server-level threat detection is disabled!
     ⚠️ No email addresses configured for threat alerts.
     ⚠️ Email to admins is not enabled.
     ⚠️ Threat detection retention period is 0 days.
-
     📂 Database: customerdb (Status: Online)
       ❌ TDE (encryption at rest) is not enabled!
       ❌ Auditing is not enabled!
@@ -48,7 +47,6 @@ This tool provides a snapshot of specific security configurations. It does not g
       ⚠️ Email to admins not enabled at DB level.
       ⚠️ Threat detection retention period is 0 days.
       ⚠️ No geo-replication configured.
-
     📂 Database: ordersdb (Status: Online)
       🔁 Geo-replication: Linked to sql-server-dr in northeurope
 
