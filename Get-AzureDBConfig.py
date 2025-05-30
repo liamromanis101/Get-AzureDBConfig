@@ -3,19 +3,20 @@ from azure.mgmt.resource import SubscriptionClient
 from azure.mgmt.sql import SqlManagementClient
 from azure.core.exceptions import HttpResponseError
 
-# Authenticate using Azure CLI
+# Authenticate using Azure CLI credentials
 credential = AzureCliCredential()
 
 def get_resource_group_from_id(resource_id: str) -> str:
     """
-    Extract the resource group name from a full Azure resource ID.
+    Extract the resource group name from an Azure resource ID.
+    Example ID: /subscriptions/{sub}/resourceGroups/{rg}/providers/...
     """
     try:
-        return resource_id.split("/")[4]  # 'resourceGroups/{rg}' => index 4
+        return resource_id.split("/")[4]
     except IndexError:
         return None
 
-# Get list of subscriptions
+# List all subscriptions
 subscription_client = SubscriptionClient(credential)
 
 for sub in subscription_client.subscriptions.list():
@@ -38,20 +39,22 @@ for sub in subscription_client.subscriptions.list():
             except HttpResponseError as e:
                 print(f"    ❌ Failed to list firewall rules: {e}")
 
-            # --- List all databases ---
+            # --- List and inspect databases ---
             try:
                 for db in sql_client.databases.list_by_server(resource_group, server.name):
                     print(f"    📂 Database: {db.name} (Status: {db.status})")
 
-                    # --- Check Transparent Data Encryption (TDE) ---
+                    # --- Transparent Data Encryption (TDE) check ---
                     try:
-                        tde = sql_client.transparent_data_encryptions.get(resource_group, server.name, db.name)
+                        tde = sql_client.transparent_data_encryptions.get(
+                            resource_group, server.name, db.name, "current"
+                        )
                         if tde.status != "Enabled":
                             print(f"      ❌ TDE (encryption at rest) is not enabled!")
                     except HttpResponseError as e:
                         print(f"      ⚠️ Failed to check TDE: {e}")
 
-                    # --- Check Threat Detection ---
+                    # --- Threat Detection check ---
                     try:
                         policy = sql_client.server_security_alert_policies.get(resource_group, server.name)
                         if policy.state != "Enabled":
