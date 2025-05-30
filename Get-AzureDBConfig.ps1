@@ -45,7 +45,7 @@ foreach ($sub in $subscriptions) {
                 $tde = Get-AzSqlDatabaseTransparentDataEncryption -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName
                 $TDE_Enabled = $tde.Status -eq "Enabled"
             } catch {
-                Write-Warning "TDE check failed for $dbName: $_"
+                Write-Warning "TDE check failed for ${dbName}: $_"
             }
 
             # Auditing
@@ -58,7 +58,7 @@ foreach ($sub in $subscriptions) {
                     $AuditingEnabled = $false
                 }
             } catch {
-                Write-Warning "Auditing check failed for $dbName: $_"
+                Write-Warning "Auditing check failed for ${dbName}: $_"
                 $AuditingEnabled = $false
             }
 
@@ -67,7 +67,7 @@ foreach ($sub in $subscriptions) {
                 $td = Get-AzSqlDatabaseAdvancedThreatProtectionSetting -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName
                 $Threat_Detection_Enabled = $td.State -eq "Enabled"
             } catch {
-                Write-Warning "Threat detection check failed for $dbName: $_"
+                Write-Warning "Threat detection check failed for ${dbName}: $_"
                 $Threat_Detection_Enabled = $false
             }
 
@@ -78,11 +78,11 @@ foreach ($sub in $subscriptions) {
                     $diag = Get-AzDiagnosticSetting -ResourceId $resourceId
                     $SendThreatDetectionAlerts = ($diag.Metrics.Count -gt 0 -or $diag.Logs.Count -gt 0)
                 } else {
-                    Write-Warning "ResourceId is null for $dbName"
+                    Write-Warning "ResourceId is null for ${dbName}"
                     $SendThreatDetectionAlerts = $false
                 }
             } catch {
-                Write-Warning "Diagnostic settings check failed for $dbName: $_"
+                Write-Warning "Diagnostic settings check failed for ${dbName}: $_"
                 $SendThreatDetectionAlerts = $false
             }
 
@@ -105,7 +105,7 @@ foreach ($sub in $subscriptions) {
                     }
                 }
             } catch {
-                Write-Warning "Geo-replication check failed for $dbName: $_"
+                Write-Warning "Geo-replication check failed for ${dbName}: $_"
                 $GeoReplicationConfigured = $false
             }
 
