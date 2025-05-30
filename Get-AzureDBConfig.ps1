@@ -62,9 +62,7 @@ foreach ($sub in $subscriptions) {
                 $dbResourceId = $db.Id
                 $diagSettings = Get-AzDiagnosticSetting -ResourceId $dbResourceId -ErrorAction Stop
                 if ($diagSettings) {
-                    # Check if auditing logs are sent to Log Analytics or Storage account
                     $AuditingEnabled = $true
-                    # Example: Extract retention days if available
                     if ($diagSettings.RetentionPolicy) {
                         $AuditingRetentionDays = $diagSettings.RetentionPolicy.Days
                     }
@@ -86,12 +84,18 @@ foreach ($sub in $subscriptions) {
                 Write-Warning "Could not retrieve Threat Detection status for database '$dbName'. Verify Az.Sql module version and permissions."
             }
 
-            # Get Geo-Replication info
+            # Get Geo-Replication info by enumerating replication links WITHOUT PartnerResourceGroupName
             try {
                 Write-Verbose "Checking geo-replication for database '$dbName'..."
+                # This gets replication links without requiring PartnerResourceGroupName
                 $replications = Get-AzSqlDatabaseReplicationLink -ResourceGroupName $rgName -ServerName $serverName -DatabaseName $dbName -ErrorAction Stop
-                if ($replications) {
+
+                if ($replications -and $replications.Count -gt 0) {
+                    # There are geo-replication links configured
                     $GeoReplicationConfigured = $true
+                    # Optionally, you could collect info about partner servers here if desired
+                } else {
+                    $GeoReplicationConfigured = $false
                 }
             } catch {
                 Write-Warning "Could not retrieve geo-replication info for database '$dbName'."
@@ -99,18 +103,18 @@ foreach ($sub in $subscriptions) {
 
             # Add to results
             $results += [PSCustomObject]@{
-                SubscriptionName            = $sub.Name
-                SubscriptionId              = $sub.Id
-                ResourceGroupName           = $rgName
-                ServerName                 = $serverName
-                DatabaseName               = $dbName
-                TDE_Enabled                = $TDE_Enabled
-                AuditingEnabled            = $AuditingEnabled
-                AuditingRetentionDays      = $AuditingRetentionDays
-                Threat_Detection_Enabled   = $Threat_Detection_Enabled
-                SendThreatDetectionAlerts  = $SendThreatDetectionAlerts
+                SubscriptionName              = $sub.Name
+                SubscriptionId                = $sub.Id
+                ResourceGroupName             = $rgName
+                ServerName                   = $serverName
+                DatabaseName                 = $dbName
+                TDE_Enabled                  = $TDE_Enabled
+                AuditingEnabled              = $AuditingEnabled
+                AuditingRetentionDays        = $AuditingRetentionDays
+                Threat_Detection_Enabled     = $Threat_Detection_Enabled
+                SendThreatDetectionAlerts    = $SendThreatDetectionAlerts
                 Threat_DetectionRetentionDays = $Threat_DetectionRetentionDays
-                GeoReplicationConfigured   = $GeoReplicationConfigured
+                GeoReplicationConfigured     = $GeoReplicationConfigured
             }
         }
     }
