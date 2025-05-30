@@ -2,7 +2,7 @@
 
 ## Overview
 
-This PowerShell tool scans all Azure SQL databases across your subscriptions and audits key security configurations, including Transparent Data Encryption (TDE), auditing, Advanced Threat Protection (ATP), and geo-replication. It generates a consolidated CSV report highlighting potential security gaps to help you harden your Azure SQL environment.
+This Python3 script scans all Azure SQL databases across your subscriptions and audits key security configurations, including Transparent Data Encryption (TDE), auditing, Advanced Threat Protection (ATP), and geo-replication. 
 
 ## What It Checks and Why It Matters
 
@@ -16,21 +16,19 @@ This PowerShell tool scans all Azure SQL databases across your subscriptions and
 
 ## Usage
 
-1. Run the script with PowerShell (requires `Az` modules). It will prompt for Azure login and automatically install missing modules if needed.  
+1. Run the script with Python3 (requires the below Python3 libs).  
 2. The script enumerates all subscriptions, SQL servers, and databases.  
-3. Outputs a CSV report (`AzureSqlSecurityReport.csv`) with the audit findings.
+3. See below for example output that can be expected. 
 
 ## Prerequisites
 
-- PowerShell 7+ (recommended) or Windows PowerShell  
-- Azure PowerShell modules (`Az.Accounts`, `Az.Resources`, `Az.Sql`, `Az.Monitor`) — auto-installed by script if missing  
+- Python3  
+- pip install azure-identity azure-mgmt-resource azure-mgmt-sql  
 - Azure account with sufficient permissions to read SQL and monitoring settings  
 
 ## Disclaimer
 
 This tool provides a snapshot of specific security configurations. It does not guarantee comprehensive security. Regular reviews, patching, network controls, and Azure Security Center policies should complement this audit.
-
-## Example Outout
 
 ### 🔒 Azure SQL Security Audit Script
 
